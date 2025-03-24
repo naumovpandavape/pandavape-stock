@@ -2,37 +2,32 @@ name: Update Stock Data
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Каждые 30 минут
-  workflow_dispatch:        # Ручной запуск
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      # Шаг 1: Загрузка кода
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false  # Отключаем встроенную аутентификацию
+          persist-credentials: false
 
-      # Шаг 2: Установка Python
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # Шаг 3: Установка зависимостей
       - name: Install dependencies
         run: pip install requests
 
-      # Шаг 4: Запуск скрипта
       - name: Run Moysklad script
         env:
           MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKLAD_API_TOKEN }}
         run: python moysklad.py
 
-      # Шаг 5: Коммит и пуш (используем ваш GH_TKN)
       - name: Commit and push changes
         env:
-          GH_TKN: ${{ secrets.GH_TKN }}  # Ваш токен с правами repo
+          GH_TKN: ${{ secrets.GH_TKN }}
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
@@ -41,9 +36,7 @@ jobs:
           git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
           git push origin main
 
-      # Шаг 6: Загрузка в Gist (используем тот же токен)
       - name: Upload to secret Gist
         env:
-          GH_TOKEN: ${{ secrets.GH_TKN }}  # Тот же токен (должен иметь права gist)
-        run: |
-          gh gist create stock_data.json --secret --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+          GH_TOKEN: ${{ secrets.GH_TKN }}
+        run: gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
