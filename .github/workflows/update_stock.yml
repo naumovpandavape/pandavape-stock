@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '*/30 * * * *'  # Каждые 30 минут
   workflow_dispatch:        # Можно запускать вручную
+  - name: Upload to secret Gist
+  run: |
+    gh gist create stock_data.json --secret --desc "Stock data"
+  env:
+    GH_TOKEN: ${{ secrets.GH_PAT }}
 jobs:
   update:
     runs-on: ubuntu-latest
