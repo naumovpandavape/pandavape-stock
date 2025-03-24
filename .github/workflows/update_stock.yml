@@ -3,31 +3,48 @@ name: Update Stock Data
 on:
   schedule:
     - cron: '*/30 * * * *'  # Каждые 30 минут
-  workflow_dispatch:        # Можно запускать вручную
+  workflow_dispatch:        # Ручной запуск
 
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    - name: Install dependencies
-      run: pip install requests
-    - name: Run script
-      env:
-        MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKLAD_API_TOKEN }}
-      run: python moysklad.py
-    - name: Commit and push
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
-        git add stock_data.json
-        git commit -m "Auto-update stock data"
-        git push
-    - name: Upload to secret Gist
-      run: |
-        gh gist create stock_data.json --secret --desc "Stock data"
-      env:
-        GH_TOKEN: ${{ secrets.GH_PAT }}
+      # Шаг 1: Подготовка репозитория
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # Важно для корректного git push
+
+      # Шаг 2: Установка Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # Шаг 3: Установка зависимостей
+      - name: Install dependencies
+        run: pip install requests
+
+      # Шаг 4: Запуск скрипта
+      - name: Run Moysklad script
+        env:
+          MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKLAD_API_TOKEN }}
+        run: python moysklad.py
+
+      # Шаг 5: Коммит и пуш изменений
+      - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TKN }}  # Токен с правами repo
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add stock_data.json
+          git commit -m "Auto-update stock data"
+          git push origin HEAD:main
+
+      # Шаг 6: Загрузка в секретный Gist
+      - name: Upload to secret Gist
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # Токен с доступом к Gist
+        run: |
+          gh gist create stock_data.json --secret --desc "Stock data"
