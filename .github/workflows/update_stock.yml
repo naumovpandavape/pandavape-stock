@@ -29,24 +29,16 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git remote set-url origin "https://$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
+          git remote set-url origin "https://x-access-token:$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
           git add stock_data.json
-          if git diff --cached --quiet; then
-            echo "Нет изменений для коммита."
-          else
-            git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
-            git push origin main
-          fi
+          git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
+          git push origin main
 
       - name: Update Gist
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          # Простое обновление существующего Gist (если gist_id.txt существует)
           if [ -f gist_id.txt ]; then
             GIST_ID=$(cat gist_id.txt)
-            gh gist edit $GIST_ID -f stock_data.json
-            echo "Gist обновлен: https://gist.github.com/$GIST_ID"
-          else
-            echo "Файл gist_id.txt не найден. Создайте его вручную с ID нужного Gist."
+            gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
           fi
