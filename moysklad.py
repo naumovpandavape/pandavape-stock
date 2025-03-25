@@ -1,5 +1,8 @@
 import requests
 import json
+import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Настройки
 API_URL = "https://api.moysklad.ru/api/remap/1.2"
@@ -9,78 +12,109 @@ HEADERS = {
     "Accept-Encoding": "gzip"
 }
 
-# Получаем ВСЕ товары (с пагинацией)
+# Настройка сессии
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504]
+)
+session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
+
 def get_all_assortment():
     url = f"{API_URL}/entity/assortment"
-    params = {"limit": 100}  # Максимальный лимит
+    params = {"limit": 100}
     all_products = []
     
     while url:
-        response = requests.get(url, headers=HEADERS, params=params)
-        if response.status_code == 200:
+        try:
+            response = session.get(url, headers=HEADERS, params=params)
+            response.raise_for_status()
             data = response.json()
             all_products.extend(data.get("rows", []))
-            url = data.get("meta", {}).get("nextHref")  # Следующая страница
-            params = None  # Для последующих запросов URL уже содержит параметры
-        else:
-            print(f"Ошибка при запросе товаров: {response.text}")
-            break
+            url = data.get("meta", {}).get("nextHref")
+            params = None
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"Ошибка при запросе товаров: {e}")
+            time.sleep(5)
+            continue
     return all_products
 
-# Получаем ВСЕ остатки (с пагинацией)
 def get_all_stock():
     url = f"{API_URL}/report/stock/bystore"
     params = {"limit": 100}
     all_stock = []
     
     while url:
-        response = requests.get(url, headers=HEADERS, params=params)
-        if response.status_code == 200:
+        try:
+            response = session.get(url, headers=HEADERS, params=params)
+            response.raise_for_status()
             data = response.json()
             all_stock.extend(data.get("rows", []))
             url = data.get("meta", {}).get("nextHref")
             params = None
-        else:
-            print(f"Ошибка при запросе остатков: {response.text}")
-            break
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"Ошибка при запросе остатков: {e}")
+            time.sleep(5)
+            continue
     return all_stock
 
-# Формируем JSON
 def generate_stock_json():
-    assortment = get_all_assortment()
-    stock_data = get_all_stock()
-
+    print("Начало обработки данных...")
+    start_time = time.time()
+    
+    # Параллельная загрузка данных
+    import threading
+    assortment = []
+    stock_data = []
+    
+    def load_assortment():
+        nonlocal assortment
+        assortment = get_all_assortment()
+    
+    def load_stock():
+        nonlocal stock_data
+        stock_data = get_all_stock()
+    
+    t1 = threading.Thread(target=load_assortment)
+    t2 = threading.Thread(target=load_stock)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    
+    # Оптимизированная обработка
+    stock_dict = {}
+    for stock in stock_data:
+        product_id = stock.get("meta", {}).get("href", "").split("/")[-1].split("?")[0]
+        if product_id:
+            stock_dict.setdefault(product_id, []).extend(stock.get("stockByStore", []))
+    
     result = []
     for product in assortment:
         product_id = product.get("id")
-        product_name = product.get("name")
-        product_code = product.get("code")
-        product_article = product.get("article")
         stores = []
-
-        # Ищем остатки для товара
-        for stock in stock_data:
-            stock_product_id = stock.get("meta", {}).get("href", "").split("/")[-1].split("?")[0]
-            if stock_product_id == product_id:
-                stock_by_store = stock.get("stockByStore", [])
-                for store in stock_by_store:
-                    store_name = store.get("name")
-                    quantity = store.get("stock", 0)
-                    if store_name:
-                        stores.append({"store": store_name, "quantity": quantity})
-
+        
+        for store in stock_dict.get(product_id, []):
+            stores.append({
+                "store": store.get("name"),
+                "quantity": store.get("stock", 0)
+            })
+        
         result.append({
             "id": product_id,
-            "name": product_name,
-            "code": product_code,
-            "article": product_article,
-            "stores": stores if stores else [{"store": "Нет данных", "quantity": 0}]
+            "name": product.get("name"),
+            "code": product.get("code"),
+            "article": product.get("article"),
+            "stores": stores or [{"store": "Нет данных", "quantity": 0}]
         })
-
-    # Сохраняем JSON
+    
     with open("stock_data.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=4)
     
-    print(f"Успешно обработано товаров: {len(result)} из {len(assortment)}")
+    print(f"Успешно обработано: {len(result)} товаров за {time.time()-start_time:.2f} сек")
 
-generate_stock_json()
+if __name__ == "__main__":
+    generate_stock_json()
