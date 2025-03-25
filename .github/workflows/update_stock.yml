@@ -33,20 +33,28 @@ jobs:
           git config --global user.email "actions@github.com"
           git remote set-url origin "https://x-access-token:$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
           git add stock_data.json
-          git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
+            git push origin main
+          fi
 
-      - name: Update existing Gist
+      - name: Update Gist
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          # Ваш постоянный Gist ID
-          GIST_ID="e6c57c6cdf407ca642b0b52e30777f69"
-          
-          # Обновляем существующий Gist
-          gh gist edit $GIST_ID \
-            --filename "stock_data.json" \
-            --file "stock_data.json" \
-            --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
-          
-          echo "✅ Gist обновлён: https://gist.github.com/$GIST_ID"
+          if [ -f gist_id.txt ]; then
+            echo "Updating existing Gist..."
+            GIST_ID=$(cat gist_id.txt)
+            gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+          else
+            echo "Creating new Gist..."
+            GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
+            GIST_ID=$(echo $GIST_URL | grep -o 'gist.github.com/naumovpandavape/[^/]*' | cut -d'/' -f2)
+            echo $GIST_ID > gist_id.txt
+            git add gist_id.txt
+            git commit -m "Add Gist ID file"
+            git push origin main
+          fi
+          echo "Gist URL: https://gist.github.com/$GIST_ID"
