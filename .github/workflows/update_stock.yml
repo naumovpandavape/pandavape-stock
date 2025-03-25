@@ -44,17 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          if [ -f gist_id.txt ]; then
-            echo "Updating existing Gist..."
-            GIST_ID=$(cat gist_id.txt)
-            gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
-          else
-            echo "Creating new Gist..."
-            GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
-            GIST_ID=$(echo $GIST_URL | grep -o 'gist.github.com/[^/]*' | cut -d'/' -f2)
-            echo $GIST_ID > gist_id.txt
-            git add gist_id.txt
-            git commit -m "Add Gist ID file"
-            git push origin main
-          fi
-          echo "Gist URL: https://gist.github.com/$GIST_ID"
+          GIST_ID="e6c57c6cdf407ca642b0b52e30777f69"
+          echo "Обновляем Gist: https://gist.github.com/$GIST_ID"
+          gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+          echo "$GIST_ID" > gist_id.txt
