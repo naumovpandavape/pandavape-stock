@@ -1,13 +1,17 @@
 name: Update Stock Data
+
 on:
   schedule:
     - cron: '*/30 * * * *'
-  workflow_dispatch:  # Это активирует кнопку!
+  workflow_dispatch:
+
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v4
         with:
@@ -15,12 +19,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install requests
-
-      - name: Test Moysklad connection
-        run: |
-          curl -v -X GET "https://api.moysklad.ru/api/remap/1.2/entity/product" \
-          -H "Authorization: Bearer ${{ secrets.MOYSKLAD_API_TOKEN }}" \
-          -H "Accept-Encoding: gzip"
 
       - name: Run Moysklad script
         env:
@@ -33,16 +31,30 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git remote set-url origin "https://$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
+          git remote set-url origin "https://x-access-token:$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
           git add stock_data.json
-          git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
+            git push origin main
+          fi
 
       - name: Update Gist
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
           if [ -f gist_id.txt ]; then
+            echo "Updating existing Gist..."
             GIST_ID=$(cat gist_id.txt)
             gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+          else
+            echo "Creating new Gist..."
+            GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
+            GIST_ID=$(echo $GIST_URL | grep -o 'gist.github.com/[^/]*' | cut -d'/' -f2)
+            echo $GIST_ID > gist_id.txt
+            git add gist_id.txt
+            git commit -m "Add Gist ID file"
+            git push origin main
           fi
+          echo "Gist URL: https://gist.github.com/$GIST_ID"
