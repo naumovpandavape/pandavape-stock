@@ -2,14 +2,16 @@ name: Update Stock Data
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Каждые 30 минут
-  workflow_dispatch:        # Ручной запуск
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v4
         with:
@@ -31,32 +33,20 @@ jobs:
           git config --global user.email "actions@github.com"
           git remote set-url origin "https://x-access-token:$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
           git add stock_data.json
-          if git diff --cached --quiet; then
-            echo "Нет изменений для коммита"
-          else
-            git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
-            git push origin main
-          fi
+          git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
+          git push origin main
 
-      - name: Update Gist
+      - name: Update existing Gist
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
           # Ваш постоянный Gist ID
           GIST_ID="e6c57c6cdf407ca642b0b52e30777f69"
           
-          # Проверка файла
-          if [ ! -f stock_data.json ]; then
-            echo "❌ Ошибка: stock_data.json не найден"
-            exit 1
-          fi
-
-          echo "🔄 Обновляем Gist..."
+          # Обновляем существующий Gist
           gh gist edit $GIST_ID \
             --filename "stock_data.json" \
-            --file "$(pwd)/stock_data.json" \
+            --file "stock_data.json" \
             --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
-
-          echo "✅ Успешно обновлено:"
-          echo "Для Tilda: https://gist.githubusercontent.com/naumovpandavape/$GIST_ID/raw/stock_data.json"
-          echo "Для просмотра: https://gist.github.com/naumovpandavape/$GIST_ID"
+          
+          echo "✅ Gist обновлён: https://gist.github.com/$GIST_ID"
