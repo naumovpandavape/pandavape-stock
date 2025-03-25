@@ -27,7 +27,7 @@ jobs:
           MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKLAD_API_TOKEN }}
         run: python moysklad.py
 
-     - name: Commit and push changes
+      - name: Commit and push changes
         env:
           GH_TKN: ${{ secrets.GH_TKN }}
         run: |
