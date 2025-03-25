@@ -2,8 +2,8 @@ name: Update Stock Data
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Каждые 30 минут
-  workflow_dispatch:        # Ручной запуск
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   update:
@@ -44,24 +44,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          # Улучшенное извлечение Gist ID
           if [ -f gist_id.txt ]; then
             echo "Updating existing Gist..."
-            GIST_ID=$(tr -d '\n' < gist_id.txt)
-            gh gist edit "$GIST_ID" -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+            GIST_ID=$(cat gist_id.txt)
+            gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
           else
             echo "Creating new Gist..."
             GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
-            GIST_ID=$(echo "$GIST_URL" | awk -F/ '{print $NF}' | cut -d' ' -f1)
-            echo "Extracted Gist ID: $GIST_ID"
+            # Точное извлечение ID (последняя часть URL после последнего /)
+            GIST_ID=$(echo "$GIST_URL" | awk -F/ '{print $NF}')
             echo "$GIST_ID" > gist_id.txt
             git add gist_id.txt
             git commit -m "Add Gist ID file"
             git push origin main
           fi
-          
-          # Четкий вывод ссылок
-          echo "========================================"
-          echo "Gist Viewer URL: https://gist.github.com/naumovpandavape/$GIST_ID"
-          echo "RAW URL (для Tilda): https://gist.githubusercontent.com/naumovpandavape/$GIST_ID/raw/stock_data.json"
-          echo "========================================"
+          echo "Gist URL: https://gist.github.com/$GIST_ID"
+          echo "RAW URL for Tilda: https://gist.githubusercontent.com/naumovpandavape/$GIST_ID/raw/stock_data.json"
