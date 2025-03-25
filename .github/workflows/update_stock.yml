@@ -29,7 +29,7 @@ jobs:
           MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKLAD_API_TOKEN }}
         run: python moysklad.py
 
-      - name: Commit and push changes
+     - name: Commit and push changes
         env:
           GH_TKN: ${{ secrets.GH_TKN }}
         run: |
@@ -37,12 +37,8 @@ jobs:
           git config --global user.email "actions@github.com"
           git remote set-url origin "https://$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
           git add stock_data.json
-          if git diff --cached --quiet; then
-            echo "Нет изменений для коммита."
-          else
-            git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
-            git push origin main
-          fi
+          git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
+          git push origin main
 
       - name: Update Gist
         env:
