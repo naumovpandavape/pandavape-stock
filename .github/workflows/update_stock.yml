@@ -44,11 +44,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          # Проверяем, есть ли файл с ID Gist
+          # Проверяем наличие файла с ID Gist
           if [ -f gist_id.txt ]; then
             echo "Обновляем существующий Gist..."
             GIST_ID=$(cat gist_id.txt)
-            gh gist edit $GIST_ID --file stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+            gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
           else
             echo "Создаем новый Gist..."
             GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
@@ -58,4 +58,4 @@ jobs:
             git commit -m "Add Gist ID file"
             git push origin main
           fi
-          echo "Gist доступен по постоянной ссылке: https://gist.github.com/$GIST_ID"
+          echo "Gist доступен по ссылке: https://gist.github.com/$GIST_ID"
