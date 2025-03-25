@@ -1,9 +1,8 @@
 name: Update Stock Data
-
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '*/30 * * * *'  # Каждые 30 минут
+  workflow_dispatch:         # Ручной запуск
 
 jobs:
   update:
@@ -34,7 +33,7 @@ jobs:
           git remote set-url origin "https://x-access-token:$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
           git add stock_data.json
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "::notice:: Нет изменений для коммита"
           else
             git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
             git push origin main
@@ -44,19 +43,47 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
+          # Функция валидации Gist ID
+          validate_gist_id() {
+            [[ "$1" =~ ^[0-9a-f]{32}$ ]] && return 0 || return 1
+          }
+
+          # Основная логика
           if [ -f gist_id.txt ]; then
-            echo "Updating existing Gist..."
-            GIST_ID=$(cat gist_id.txt)
-            gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
+            echo "▸ Обнаружен файл gist_id.txt"
+            GIST_ID=$(head -n 1 gist_id.txt | tr -d '[:space:]')
+            
+            if validate_gist_id "$GIST_ID"; then
+              echo "▸ Обновляю существующий Gist ($GIST_ID)"
+              if ! gh gist edit "$GIST_ID" \
+                   --file stock_data.json \
+                   --desc "Stock data $(date +'%Y-%m-%d %H:%M')"; then
+                echo "::error:: Ошибка обновления Gist. Проверьте ID и права доступа."
+                exit 1
+              fi
+            else
+              echo "::error:: Неверный формат Gist ID: '$GIST_ID'"
+              exit 1
+            fi
           else
-            echo "Creating new Gist..."
-            GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
-            # Точное извлечение ID (последняя часть URL после последнего /)
-            GIST_ID=$(echo "$GIST_URL" | awk -F/ '{print $NF}')
-            echo "$GIST_ID" > gist_id.txt
-            git add gist_id.txt
-            git commit -m "Add Gist ID file"
-            git push origin main
+            echo "▸ Создаю новый Gist..."
+            GIST_URL=$(gh gist create stock_data.json \
+              --public=false \
+              --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
+            GIST_ID=$(echo "$GIST_URL" | grep -oE '[0-9a-f]{32}' | head -n 1)
+            
+            if validate_gist_id "$GIST_ID"; then
+              echo "$GIST_ID" > gist_id.txt
+              git add gist_id.txt
+              git commit -m "Add Gist ID file"
+              git push origin main
+              echo "▸ Новый Gist создан: $GIST_ID"
+            else
+              echo "::error:: Не удалось извлечь Gist ID из URL: $GIST_URL"
+              exit 1
+            fi
           fi
-          echo "Gist URL: https://gist.github.com/$GIST_ID"
-          echo "RAW URL for Tilda: https://gist.githubusercontent.com/naumovpandavape/$GIST_ID/raw/stock_data.json"
+
+          # Вывод ссылок
+          echo "::notice:: Gist URL: https://gist.github.com/$GIST_ID"
+          echo "::notice:: RAW URL (для Tilda): https://gist.githubusercontent.com/naumovpandavape/$GIST_ID/raw/stock_data.json"
