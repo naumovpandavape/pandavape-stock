@@ -10,15 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: pip install requests gh
+        run: pip install requests
 
       - name: Run Moysklad script
         env:
@@ -40,39 +38,15 @@ jobs:
             git push origin main
           fi
 
-      - name: Update existing Gist
+      - name: Update Gist
         env:
           GH_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          # Устанавливаем корректный PATH для gh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          
-          # Проверяем наличие файла с ID Gist
+          # Простое обновление существующего Gist (если gist_id.txt существует)
           if [ -f gist_id.txt ]; then
-            echo "Обновляем существующий Gist..."
-            GIST_ID=$(cat gist_id.txt | tr -d '\n' | tr -d '\r')
-            echo "Используем Gist ID: $GIST_ID"
-            
-            # Проверяем существование Gist
-            if gh gist view $GIST_ID >/dev/null 2>&1; then
-              gh gist edit $GIST_ID -f stock_data.json --desc "Stock data $(date +'%Y-%m-%d %H:%M')"
-              echo "Gist успешно обновлен."
-            else
-              echo "Gist не найден, создаем новый..."
-              GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
-              GIST_ID=$(echo $GIST_URL | grep -oP 'gist.github.com/\K[0-9a-f]+')
-              echo $GIST_ID > gist_id.txt
-              git add gist_id.txt
-              git commit -m "Add new Gist ID file"
-              git push origin main
-            fi
+            GIST_ID=$(cat gist_id.txt)
+            gh gist edit $GIST_ID -f stock_data.json
+            echo "Gist обновлен: https://gist.github.com/$GIST_ID"
           else
-            echo "Создаем новый Gist..."
-            GIST_URL=$(gh gist create stock_data.json --public=false --desc "Stock data $(date +'%Y-%m-%d %H:%M')")
-            GIST_ID=$(echo $GIST_URL | grep -oP 'gist.github.com/\K[0-9a-f]+')
-            echo $GIST_ID > gist_id.txt
-            git add gist_id.txt
-            git commit -m "Add Gist ID file"
-            git push origin main
+            echo "Файл gist_id.txt не найден. Создайте его вручную с ID нужного Gist."
           fi
-          echo "Gist доступен по ссылке: https://gist.github.com/$GIST_ID"
