@@ -13,15 +13,18 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run Python script
-        run: python moysklad.py  # Запуск твоего скрипта, который обновляет stock_data.json
+        run: python moysklad.py  # Генерируем stock_data.json
+
+      - name: Prepare JSON payload
+        run: |
+          jq -n --arg content "$(cat stock_data.json | jq -Rs .)" '{"files": {"stock_data.json": {"content": $content}}}' > payload.json
 
       - name: Update Gist
         env:
-          GIST_ID: "ba2621f911b6733cad947f820748a192"  # Заменить на ID Gist из URL
-          GITHUB_TOKEN: ${{ secrets.GH_TKN }}  # Секретный токен GitHub
+          GIST_ID: "ba2621f911b6733cad947f820748a192"
+          GITHUB_TOKEN: ${{ secrets.GH_TKN }}
         run: |
-          CONTENT=$(jq -Rs . < stock_data.json)  # Кодируем JSON в строку
           curl -X PATCH "https://api.github.com/gists/$GIST_ID" \
           -H "Authorization: token $GITHUB_TOKEN" \
           -H "Content-Type: application/json" \
-          -d "{\"files\": {\"stock_data.json\": {\"content\": $CONTENT}}}"
+          --data "@payload.json"
