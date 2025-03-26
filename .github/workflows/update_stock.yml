@@ -17,7 +17,9 @@ jobs:
 
       - name: Prepare JSON payload
         run: |
-          jq -n --arg content "$(cat stock_data.json | jq -Rs .)" '{"files": {"stock_data.json": {"content": $content}}}' > payload.json
+          echo '{"files": {"stock_data.json": {"content": ' > payload.json
+          jq -Rs . stock_data.json >> payload.json
+          echo '}}}' >> payload.json
 
       - name: Update Gist
         env:
