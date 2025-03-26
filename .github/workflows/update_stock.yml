@@ -1,40 +1,27 @@
-name: Update Stock Data
+name: Update Gist with stock data
+
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Каждые 30 минут
-  workflow_dispatch:
+    - cron: "*/30 * * * *"  # Запуск каждые 30 минут
+  workflow_dispatch:  # Возможность запустить вручную
 
 jobs:
-  update:
+  update_gist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+      - name: Run Python script
+        run: python your_script.py  # Запуск твоего скрипта, который обновляет stock_data.json
 
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Run Moysklad script
+      - name: Update Gist
         env:
-          MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKLAD_API_TOKEN }}
-        run: python moysklad.py
-
-      - name: Commit and push changes
-        env:
-          GH_TKN: ${{ secrets.GH_TKN }}
+          GIST_ID: "ba2621f911b6733cad947f820748a192"  # Заменить на ID Gist из URL
+          GITHUB_TOKEN: ${{ secrets.GH_TKN }}  # Секретный токен GitHub
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git remote set-url origin "https://x-access-token:$GH_TKN@github.com/naumovpandavape/pandavape-stock.git"
-          git add stock_data.json
-          if git diff --cached --quiet; then
-            echo "::notice:: Нет изменений для коммита"
-          else
-            git commit -m "Auto-update stock data ($(date +'%Y-%m-%d %H:%M'))"
-            git push origin main
-          fi
+          CONTENT=$(jq -Rs . < stock_data.json)  # Кодируем JSON в строку
+          curl -X PATCH "https://api.github.com/gists/$GIST_ID" \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"files\": {\"stock_data.json\": {\"content\": $CONTENT}}}"
