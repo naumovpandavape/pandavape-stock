@@ -14,7 +14,7 @@ HEADERS = {
     "Accept-Encoding": "gzip",
     "Content-Type": "application/json"
 }
-OUTPUT_FILENAME = "stock_data.json"
+OUTPUT_FILENAME = "stock_data.json" # Имя ВЫХОДНОГО файла
 ERROR_LOG_FILENAME = "error_log.txt"
 REQUEST_DELAY = 0.3
 RETRY_COUNT = 3
@@ -37,14 +37,15 @@ adapter = HTTPAdapter(max_retries=retry_strategy)
 session.mount("https://", adapter)
 session.headers.update(HEADERS)
 
-def log_error(message, response=None):
-    """Логирование ошибок (код без изменений)"""
+def log_error(message, response=None, level="ERROR"):
+    """Логирование ошибок и предупреждений"""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    error_msg = f"[{timestamp}] ERROR: {message}"
+    log_prefix = f"[{timestamp}] {level}:"
+    error_msg = f"{log_prefix} {message}"
     if response is not None:
         response_text_preview = response.text[:500] if response.text else "No response body"
         error_msg += f"\n  URL: {response.url}\n  Status: {response.status_code}\n  Response: {response_text_preview}..."
-    print(error_msg)
+    print(error_msg) # Выводим в консоль
     try:
         with open(ERROR_LOG_FILENAME, "a", encoding="utf-8") as f:
             f.write(error_msg + "\n" + ("-"*20) + "\n")
@@ -68,13 +69,13 @@ def fetch_all_pages(endpoint, params=None, expand_params=None, filters=None):
     while url:
         req_count += 1
         log_url = url.replace(API_TOKEN, "***TOKEN***")
-        # print(f"  Запрос {req_count}: {log_url.replace(API_URL,'')}...") # Сделаем вывод менее подробным
         try:
             response = session.get(url, params=current_params)
             if not response.ok:
-                 print(f"    WARNING: Response Status: {response.status_code} for {log_url.replace(API_URL,'')}")
+                 # Логируем только статус, без паники
+                 print(f"    INFO: Response Status: {response.status_code} for {log_url.replace(API_URL,'')}")
 
-            response.raise_for_status()
+            response.raise_for_status() # Вызовет ошибку для 4xx/5xx
             data = response.json()
 
             if "errors" in data:
@@ -89,8 +90,8 @@ def fetch_all_pages(endpoint, params=None, expand_params=None, filters=None):
                  batch=[]
 
             all_items.extend(batch)
-            # Уменьшим частоту вывода прогресса
-            if req_count == 1 or len(all_items) % 1000 < len(batch): # Выводим на первой странице и примерно каждую 1000-ю запись
+            # Вывод прогресса реже
+            if req_count == 1 or len(all_items) % 1000 < len(batch):
                  print(f"    Загружено: {len(batch)} (Всего: {len(all_items)})")
 
             url = data.get("meta", {}).get("nextHref")
@@ -100,51 +101,34 @@ def fetch_all_pages(endpoint, params=None, expand_params=None, filters=None):
                 time.sleep(REQUEST_DELAY)
 
         except requests.exceptions.Timeout as e:
-             log_error(f"Таймаут запроса {endpoint}: {e}", getattr(e, 'response', None))
+             log_error(f"Таймаут запроса {endpoint}: {e}", getattr(e, 'response', None), level="WARN")
              print("    Повторная попытка через 5 секунд...")
              time.sleep(5)
         except requests.exceptions.RequestException as e:
-            if getattr(e, 'response', None) is not None and e.response.status_code == 401:
-                 log_error(f"ОШИБКА АУТЕНТИФИКАЦИИ (401) для {endpoint}. Проверьте правильность API_TOKEN.", e.response)
+            response = getattr(e, 'response', None)
+            if response is not None and response.status_code == 401:
+                 log_error(f"ОШИБКА АУТЕНТИФИКАЦИИ (401) для {endpoint}. Проверьте правильность API_TOKEN.", response)
                  print("!!! ПРОВЕРЬТЕ API ТОКЕН !!!")
-                 return None
-            elif getattr(e, 'response', None) is not None and e.response.status_code == 403:
-                 log_error(f"ОШИБКА ДОСТУПА (403) для {endpoint}. Проверьте права API токена.", e.response)
+                 return None # Критическая ошибка - прерываем
+            elif response is not None and response.status_code == 403:
+                 log_error(f"ОШИБКА ДОСТУПА (403) для {endpoint}. Проверьте права API токена (особенно на чтение Групп товаров).", response, level="WARN")
                  print("!!! ПРОВЕРЬТЕ ПРАВА API ТОКЕНА !!!")
-                 # return None # Реши, прерывать ли выполнение
+                 # Не прерываем, но категории могут быть неполными
             else:
-                 log_error(f"Ошибка запроса {endpoint}: {e}", getattr(e, 'response', None))
+                 log_error(f"Ошибка запроса {endpoint}: {e}", response, level="WARN")
                  print("    Проблема с запросом. Ожидание 5 секунд перед возможным повтором...")
-                 time.sleep(5)
+                 time.sleep(5) # Даем время на восстановление сети/сервера
 
         except json.JSONDecodeError as e:
              log_error(f"Ошибка декодирования JSON ответа {endpoint}: {e}", response)
              print("    Не удалось разобрать ответ сервера. Пропуск страницы.")
-             url = None
+             url = None # Прерываем пагинацию для этого запроса
         except Exception as e:
             log_error(f"Неожиданная ошибка при запросе {endpoint}: {type(e).__name__}: {e}", response)
-            url = None
+            url = None # Прерываем на всякий случай
 
     print(f"Загрузка {endpoint} завершена. Всего записей: {len(all_items)}")
     return all_items
-
-def get_category_names(product_folder_data):
-    """Извлекает имя категории и имя родительской категории."""
-    category_name = None
-    parent_category_name = None
-
-    if isinstance(product_folder_data, dict):
-        category_name = product_folder_data.get("name")
-        parent_folder_data = product_folder_data.get("parent")
-        if isinstance(parent_folder_data, dict):
-            parent_category_name = parent_folder_data.get("name")
-            # --- ОТЛАДКА ---
-            # Раскомментируй, если родитель все еще null, чтобы увидеть всю структуру родителя
-        print(f"    DEBUG Parent Data for {category_name}: {json.dumps(parent_folder_data, ensure_ascii=False, indent=2)}")
-            # --- КОНЕЦ ОТЛАДКИ ---
-
-    return category_name, parent_category_name
-
 
 def generate_stock_json():
     """Генерация итогового JSON файла"""
@@ -152,56 +136,46 @@ def generate_stock_json():
     start_time = time.time()
 
     try:
-        # 1. Получаем ассортимент с запросом ДВУХ уровней родительских папок
+        # 1. Получаем ассортимент с expand=productFolder,productFolder.parent
         assortment_filters = []
         if FILTER_ONLY_PRODUCTS:
             assortment_filters.append("type=product")
         if FILTER_ONLY_ACTIVE:
             assortment_filters.append("archived=false")
 
-        # *** ИЗМЕНЕНИЕ ЗДЕСЬ: Пробуем запросить больше уровней вложенности ***
-        expand_params_value = "productFolder,productFolder.parent,productFolder.parent.parent"
+        expand_params_value = "productFolder,productFolder.parent" # Стандартный expand
 
         assortment = fetch_all_pages(
             "entity/assortment",
             params={"limit": 100},
-            expand_params=expand_params_value, # Используем новый expand
+            expand_params=expand_params_value,
             filters=assortment_filters if assortment_filters else None
         )
 
-        if assortment is None:
-             print("\n!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить данные ассортимента. Прерывание.")
-             return
-        elif not assortment:
+        if assortment is None: return
+        if not assortment:
              print("\nВНИМАНИЕ: Список ассортимента пуст. Файл JSON будет пустым.")
              with open(OUTPUT_FILENAME, "w", encoding="utf-8") as f: json.dump([], f)
              return
 
-        # 2. Получаем остатки (код без изменений)
+        # 2. Получаем остатки
         stock_data = fetch_all_pages(
              "report/stock/bystore",
              params={"limit": 100}
         )
-
-        if stock_data is None:
-             print("\n!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить данные об остатках. Прерывание.")
-             return
-        elif not stock_data:
-             print("\nВНИМАНИЕ: Данные по остаткам не получены или пусты. Поле 'stores' будет пустым.")
+        if stock_data is None: return
+        if not stock_data: print("\nВНИМАНИЕ: Данные по остаткам не получены или пусты.")
 
 
-        # 3. Создаем словарь остатков
+        # 3. Создаем словарь остатков - ВОЗВРАЩАЕМ FLOAT ДЛЯ QUANTITY
         print("\nСоздание словаря остатков...")
         stock_dict = {}
         stock_processed_count = 0
         if stock_data:
             for stock_item in stock_data:
                 try:
-                    meta = stock_item.get("meta")
-                    if not isinstance(meta, dict): continue
-                    href = meta.get("href")
-                    if not isinstance(href, str): continue
-                    product_id_from_stock = href.split('/')[-1]
+                    meta = stock_item.get("meta"); href = meta.get("href") if isinstance(meta,dict) else None
+                    product_id_from_stock = href.split('/')[-1] if isinstance(href, str) else None
                     if not product_id_from_stock: continue
 
                     stores_list = stock_item.get("stockByStore", [])
@@ -211,20 +185,18 @@ def generate_stock_json():
                     for store_info in stores_list:
                          if not isinstance(store_info, dict): continue
                          store_name = store_info.get("name", "Неизвестный склад")
-                         quantity_val = store_info.get("stock") # Получаем значение
+                         quantity_val = store_info.get("stock")
 
-                         # *** ИЗМЕНЕНИЕ ЗДЕСЬ: Возвращаем float для quantity ***
+                         # Преобразуем в float, если значение есть, иначе 0.0
                          try:
-                             # Преобразуем в float, если значение есть, иначе 0.0
                              quantity = float(quantity_val) if quantity_val is not None else 0.0
                          except (ValueError, TypeError):
-                             quantity = 0.0 # По умолчанию 0.0 при ошибке
+                             quantity = 0.0
 
                          current_product_stores.append({
                              "store": str(store_name),
                              "quantity": quantity # Сохраняем как float
                          })
-
                     stock_dict.setdefault(product_id_from_stock, []).extend(current_product_stores)
                     stock_processed_count += 1
                 except Exception as e:
@@ -240,6 +212,7 @@ def generate_stock_json():
         result_list = []
         processed_count = 0
         products_skipped_no_article = 0
+        parent_data_warnings = 0 # Счетчик предупреждений о родителях
 
         for product in assortment:
             try:
@@ -257,8 +230,36 @@ def generate_stock_json():
 
                  product_stores = stock_dict.get(product_id, [])
 
-                 # *** ИЗМЕНЕНИЕ ЗДЕСЬ: Используем новую функцию для получения имен категорий ***
-                 tilda_category, tilda_parent_category = get_category_names(product.get("productFolder"))
+                 # --- Получение категорий ---
+                 tilda_category = None
+                 tilda_parent_category = None
+                 product_folder_data = product.get("productFolder") # Данные папки товара
+
+                 if isinstance(product_folder_data, dict):
+                      tilda_category = product_folder_data.get("name") # Имя папки товара
+
+                      # Проверяем наличие и содержимое поля 'parent'
+                      if "parent" in product_folder_data:
+                           parent_folder_data = product_folder_data["parent"]
+                           if isinstance(parent_folder_data, dict):
+                                # Если parent - это словарь, извлекаем имя
+                                tilda_parent_category = parent_folder_data.get("name")
+                                # Логируем, если имя родителя не найдено внутри объекта родителя
+                                if not tilda_parent_category:
+                                     log_error(f"Имя родительской папки не найдено в объекте parent для товара '{product_name}' в папке '{tilda_category}'. Данные parent: {json.dumps(parent_folder_data)}", level="WARN")
+                                     parent_data_warnings += 1
+                           else:
+                                # Если parent есть, но это НЕ словарь (например, null или строка)
+                                # Это может указывать на папку верхнего уровня ИЛИ на проблему с expand/правами
+                                if parent_folder_data is not None: # Игнорируем None, это нормально для верхнего уровня
+                                     log_error(f"Поле 'parent' для папки '{tilda_category}' (товар '{product_name}') не является словарем (получено: {type(parent_folder_data)}). Возможно, проблема с expand или правами токена. Данные parent: {json.dumps(parent_folder_data)}", level="WARN")
+                                     parent_data_warnings += 1
+                                # В этом случае tilda_parent_category останется None
+                      else:
+                           # Если самого поля 'parent' нет в product_folder_data
+                           log_error(f"Поле 'parent' отсутствует в данных папки '{tilda_category}' для товара '{product_name}'. Проверьте права токена на чтение структуры папок.", level="WARN")
+                           parent_data_warnings += 1
+                           # tilda_parent_category останется None
 
                  # Создаем объект в нужном порядке
                  output_product = {
@@ -281,9 +282,11 @@ def generate_stock_json():
         print(f"\nФормирование JSON завершено. Товаров в итоговом списке: {len(result_list)}")
         if products_skipped_no_article > 0:
              print(f"  ПРЕДУПРЕЖДЕНИЕ: {products_skipped_no_article} товаров были пропущены из-за отсутствия артикула/кода.")
+        if parent_data_warnings > 0:
+             print(f"  ПРЕДУПРЕЖДЕНИЕ: Обнаружено {parent_data_warnings} проблем с получением данных родительских папок. Проверьте файл '{ERROR_LOG_FILENAME}' и права API-токена.")
 
 
-        # 5. Сохранение результата (код без изменений)
+        # 5. Сохранение результата
         print(f"\nСохранение результата в файл: {OUTPUT_FILENAME}")
         try:
             with open(OUTPUT_FILENAME, "w", encoding="utf-8") as f:
@@ -293,7 +296,6 @@ def generate_stock_json():
              log_error(f"Не удалось сохранить файл {OUTPUT_FILENAME}: {e}")
         except Exception as e:
              log_error(f"Неожиданная ошибка при сохранении файла: {e}")
-
 
         print(f"\n=== Обработка полностью завершена ===")
         print(f"Итого товаров в файле: {len(result_list)}")
@@ -307,11 +309,9 @@ def generate_stock_json():
     finally:
         print("\nСкрипт завершил работу.")
 
-
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     print(f"Рабочая директория: {os.getcwd()}")
-
     generate_stock_json()
     # input("\nНажмите Enter для выхода...")
