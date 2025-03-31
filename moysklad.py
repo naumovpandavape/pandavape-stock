@@ -98,7 +98,8 @@ def fetch_all_pages(endpoint, params=None, expand_params=None, filters=None):
 
             if url:
                 time.sleep(REQUEST_DELAY)
-except requests.exceptions.Timeout as e:
+
+        except requests.exceptions.Timeout as e:
              log_error(f"Таймаут запроса {endpoint}: {e}", getattr(e, 'response', None))
              print("    Повторная попытка через 5 секунд...")
              time.sleep(5)
@@ -121,7 +122,7 @@ except requests.exceptions.Timeout as e:
              print("    Не удалось разобрать ответ сервера. Пропуск страницы.")
              url = None
         except Exception as e:
-            log_error(f"Неожиданная ошибка при запросе {endpoint}: {type(e).name}: {e}", response)
+            log_error(f"Неожиданная ошибка при запросе {endpoint}: {type(e).__name__}: {e}", response)
             url = None
 
     print(f"Загрузка {endpoint} завершена. Всего записей: {len(all_items)}")
@@ -181,7 +182,8 @@ def generate_stock_json():
              "report/stock/bystore",
              params={"limit": 100}
         )
-if stock_data is None:
+
+        if stock_data is None:
              print("\n!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить данные об остатках. Прерывание.")
              return
         elif not stock_data:
@@ -269,8 +271,9 @@ if stock_data is None:
                       "stores": product_stores
                  }
                  result_list.append(output_product)
-except Exception as e:
-                 log_error(f"Критическая ошибка обработки товара ID {product.get('id', 'N/A')} '{product.get('name', 'N/A')}': {type(e).name}: {e}")
+
+            except Exception as e:
+                 log_error(f"Критическая ошибка обработки товара ID {product.get('id', 'N/A')} '{product.get('name', 'N/A')}': {type(e).__name__}: {e}")
                  import traceback
                  traceback.print_exc()
                  continue
@@ -298,15 +301,15 @@ except Exception as e:
         print(f"Общее время выполнения: {end_time - start_time:.2f} секунд")
 
     except Exception as e:
-        log_error(f"КРИТИЧЕСКАЯ ОШИБКА выполнения скрипта: {type(e).name}: {e}")
+        log_error(f"КРИТИЧЕСКАЯ ОШИБКА выполнения скрипта: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
     finally:
         print("\nСкрипт завершил работу.")
 
 
-if name == "main":
-    script_dir = os.path.dirname(os.path.abspath(file))
+if __name__ == "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     print(f"Рабочая директория: {os.getcwd()}")
 
