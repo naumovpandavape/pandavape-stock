@@ -140,7 +140,7 @@ def get_category_names(product_folder_data):
             parent_category_name = parent_folder_data.get("name")
             # --- ОТЛАДКА ---
             # Раскомментируй, если родитель все еще null, чтобы увидеть всю структуру родителя
-            # print(f"    DEBUG Parent Data for {category_name}: {json.dumps(parent_folder_data, ensure_ascii=False, indent=2)}")
+        print(f"    DEBUG Parent Data for {category_name}: {json.dumps(parent_folder_data, ensure_ascii=False, indent=2)}")
             # --- КОНЕЦ ОТЛАДКИ ---
 
     return category_name, parent_category_name
