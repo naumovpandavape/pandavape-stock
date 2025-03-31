@@ -3,238 +3,199 @@ import json
 import time
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import threading
-from functools import lru_cache # For caching folder details
 
 # Настройки
 API_URL = "https://api.moysklad.ru/api/remap/1.2"
-# WARNING: Avoid hardcoding tokens directly in scripts for production. Use environment variables or config files.
 API_TOKEN = "a88e8da42807ebf8f89e6fdef605193f7a9ddc8c"
 HEADERS = {
     "Authorization": f"Bearer {API_TOKEN}",
-    "Accept-Encoding": "gzip",
-    "Content-Type": "application/json" # Good practice to add
+    "Accept-Encoding": "gzip"
 }
 
 # Настройка сессии
 session = requests.Session()
 retry_strategy = Retry(
-    total=5, # Increased retries slightly
+    total=3,
     backoff_factor=1,
     status_forcelist=[429, 500, 502, 503, 504]
 )
-adapter = HTTPAdapter(max_retries=retry_strategy)
-session.mount("https://", adapter)
-session.headers.update(HEADERS) # Set headers for the whole session
+session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
 
-# --- Helper Functions ---
+def log_error(message, response=None):
+    """Логирование ошибок"""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    error_msg = f"[{timestamp}] ERROR: {message}"
+    if response:
+        error_msg += f"\nURL: {response.url}\nStatus: {response.status_code}\nResponse: {response.text[:500]}"
+    print(error_msg)
+    with open("error_log.txt", "a", encoding="utf-8") as f:
+        f.write(error_msg + "\n")
 
-def fetch_paginated_data(endpoint_url, params={"limit": 100}):
-    """Fetches all data from a paginated MoySklad endpoint."""
-    all_data = []
-    url = endpoint_url
-    current_params = params.copy() # Use a copy to avoid modifying the original
-
-    print(f"Fetching data from {endpoint_url}...")
-    page_count = 0
+def get_all_assortment():
+    """Получение всего ассортимента с группами товаров"""
+    url = f"{API_URL}/entity/assortment"
+    params = {
+        "limit": 100,
+        "expand": "productFolder,productFolder.parent"
+    }
+    all_products = []
+    
+    print("\nНачало загрузки ассортимента...")
+    
     while url:
         try:
-            # print(f"Requesting: {url} with params: {current_params}") # Debugging line
-            response = session.get(url, params=current_params)
-            response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+            response = session.get(url, headers=HEADERS, params=params)
+            response.raise_for_status()
             data = response.json()
-            rows = data.get("rows", [])
-            all_data.extend(rows)
-            page_count += 1
-            print(f"  Fetched page {page_count}, {len(rows)} items. Total items so far: {len(all_data)}")
-
-            # Get the next URL, clear params if nextHref is present
+            
+            if "errors" in data:
+                for error in data["errors"]:
+                    log_error(f"API Error: {error.get('error', 'Unknown error')}", response)
+                break
+                
+            batch = data.get("rows", [])
+            all_products.extend(batch)
+            print(f"Загружено {len(batch)} товаров. Всего: {len(all_products)}")
+            
             url = data.get("meta", {}).get("nextHref")
-            current_params = None # Subsequent requests use the full nextHref URL
-
-            time.sleep(0.2) # Be nice to the API, reduce slightly from 0.5
+            params = None  # Для последующих запросов параметры уже в URL
+            time.sleep(0.3)
+            
         except requests.exceptions.RequestException as e:
-            print(f"  Error during request to {endpoint_url}: {e}")
-            print(f"  Response status: {response.status_code if 'response' in locals() else 'N/A'}")
-            print(f"  Response text: {response.text if 'response' in locals() else 'N/A'}")
-            print("  Retrying after 5 seconds...")
+            log_error(f"Ошибка запроса ассортимента: {str(e)}", getattr(e, 'response', None))
             time.sleep(5)
-            # Don't continue, the retry mechanism in the session should handle it
-            # If retries fail, raise_for_status() will eventually raise the exception
-        except json.JSONDecodeError as e:
-            print(f"  Error decoding JSON from {endpoint_url}: {e}")
-            print(f"  Response text: {response.text if 'response' in locals() else 'N/A'}")
-            print("  Skipping this page attempt after delay...")
+            continue
+            
+    return all_products
+
+def get_all_stock():
+    """Получение всех остатков"""
+    url = f"{API_URL}/report/stock/bystore"
+    params = {"limit": 100}
+    all_stock = []
+    
+    print("\nНачало загрузки остатков...")
+    
+    while url:
+        try:
+            response = session.get(url, headers=HEADERS, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if "errors" in data:
+                for error in data["errors"]:
+                    log_error(f"API Error: {error.get('error', 'Unknown error')}", response)
+                break
+                
+            batch = data.get("rows", [])
+            all_stock.extend(batch)
+            print(f"Загружено {len(batch)} остатков. Всего: {len(all_stock)}")
+            
+            url = data.get("meta", {}).get("nextHref")
+            params = None
+            time.sleep(0.3)
+            
+        except requests.exceptions.RequestException as e:
+            log_error(f"Ошибка запроса остатков: {str(e)}", getattr(e, 'response', None))
             time.sleep(5)
-            # Decide if you want to break or try to continue (might lose data)
-            # For now, let's retry getting the next page if possible
-            if url: # If we already have a nextHref, try that
-                current_params = None
-                continue
-            else: # If no nextHref, we might be stuck
-                print("  Cannot proceed without a valid nextHref. Aborting fetch for this endpoint.")
-                break # Stop fetching for this endpoint
+            continue
+            
+    return all_stock
 
-    print(f"Finished fetching from {endpoint_url}. Total items: {len(all_data)}")
-    return all_data
-
-@lru_cache(maxsize=1024) # Cache results for folder URLs
-def get_folder_details(folder_href):
-    """Fetches folder name and pathName from its href, with caching."""
-    if not folder_href:
+def get_group_hierarchy(product):
+    """Получение иерархии групп для товара"""
+    if "productFolder" not in product:
         return None
+        
     try:
-        # print(f"  Fetching folder details: {folder_href}") # Debugging
-        response = session.get(folder_href) # Headers are set on session
-        response.raise_for_status()
-        data = response.json()
-        return {
-            "name": data.get("name"),
-            "pathName": data.get("pathName") # Full path like "Category / Subcategory"
-        }
-    except requests.exceptions.RequestException as e:
-        print(f"  Error fetching folder details for {folder_href}: {e}")
-        # Return None or a default structure if needed
+        group = product["productFolder"]
+        hierarchy = [{
+            "id": group.get("meta", {}).get("href", "").split("/")[-1],
+            "name": group.get("name"),
+            "code": group.get("code", "")
+        }]
+        
+        # Добавляем родительские группы, если они есть
+        parent = group.get("parent")
+        while parent:
+            hierarchy.append({
+                "id": parent.get("meta", {}).get("href", "").split("/")[-1],
+                "name": parent.get("name"),
+                "code": parent.get("code", "")
+            })
+            parent = parent.get("parent")
+            
+        return hierarchy
+        
+    except Exception as e:
+        log_error(f"Ошибка обработки группы товара: {str(e)}")
         return None
-    except json.JSONDecodeError as e:
-        print(f"  Error decoding JSON for folder {folder_href}: {e}")
-        return None
-
 
 def generate_stock_json():
-    print("Начало обработки данных...")
+    """Генерация итогового JSON файла"""
+    print("\n=== Начало обработки данных ===")
     start_time = time.time()
-
-    assortment_data = []
-    stock_data = []
-    threads = []
-
-    print("Запуск параллельной загрузки данных (Товары и Остатки)...")
-    def load_assortment():
-        nonlocal assortment_data
-        assortment_url = f"{API_URL}/entity/assortment"
-        assortment_data = fetch_paginated_data(assortment_url)
-
-    def load_stock():
-        nonlocal stock_data
-        stock_url = f"{API_URL}/report/stock/bystore"
-        # Optional: Add filter for specific stores if needed
-        # params = {"limit": 100, "filter": "store=STORE_HREF_1;store=STORE_HREF_2"}
-        stock_data = fetch_paginated_data(stock_url)
-
-    t1 = threading.Thread(target=load_assortment)
-    t2 = threading.Thread(target=load_stock)
-
-    t1.start()
-    t2.start()
-
-    t1.join()
-    t2.join()
-    print("Загрузка данных завершена.")
-
-    if not assortment_data:
-        print("Ошибка: Не удалось загрузить данные о товарах (assortment). Выход.")
-        return
-    if not stock_data:
-        print("Предупреждение: Не удалось загрузить данные об остатках (stock). Остатки не будут добавлены.")
-        # Continue processing without stock if desired, or exit
-        # return
-
-    print("Обработка остатков...")
-    stock_dict = {}
-    for stock_item in stock_data:
-        # The meta in stock report refers to the *assortment* item
-        item_meta = stock_item.get("meta")
-        if not item_meta: continue
-
-        # Extract ID reliably from href (handles potential query parameters)
-        href = item_meta.get("href", "")
-        try:
-            item_id = href.split("/")[-1].split("?")[0]
-        except IndexError:
-            print(f"  Warning: Could not parse ID from href: {href}")
-            continue
-
-        if item_id:
-            # Ensure stockByStore is a list
-            stores_stock_info = stock_item.get("stockByStore", [])
-            if not isinstance(stores_stock_info, list):
-                 print(f"  Warning: 'stockByStore' is not a list for item ID {item_id}. Skipping stock info.")
-                 stores_stock_info = []
-
-            # Aggregate stock info if product appears multiple times (shouldn't happen in 'bystore' normally)
-            # More robust: Directly use the list provided
-            stock_dict[item_id] = stores_stock_info # Overwrites if duplicate ID found, which is unusual for bystore report
-
-    print("Обработка товаров и объединение данных...")
-    result = []
-    processed_count = 0
-    total_assortment = len(assortment_data)
-    for product in assortment_data:
-        processed_count += 1
-        if processed_count % 100 == 0:
-            print(f"  Обработано {processed_count}/{total_assortment} товаров...")
-
-        product_id = product.get("id")
-        if not product_id:
-            print(f"  Warning: Skipping item without ID: {product.get('name', 'N/A')}")
-            continue
-
-        # --- Get Folder/Group Info ---
-        folder_info = None
-        group_name = None
-        group_path = None
-        product_folder_meta = product.get("productFolder", {}).get("meta")
-        if product_folder_meta and product_folder_meta.get("href"):
-            folder_href = product_folder_meta.get("href")
-            # Use cached function to get details
-            folder_info = get_folder_details(folder_href)
-            if folder_info:
-                group_name = folder_info.get("name")
-                group_path = folder_info.get("pathName") # Full path
-
-        # --- Get Stock Info ---
-        product_stock_list = stock_dict.get(product_id, [])
-        stores = []
-        if product_stock_list:
-             for store_stock in product_stock_list:
-                 store_name = store_stock.get("name")
-                 quantity = store_stock.get("stock", 0)
-                 if store_name is not None: # Check if store name exists
-                     stores.append({
-                         "store": store_name,
-                         "quantity": quantity
-                     })
-        else:
-            # Keep structure consistent, even if no stock data found for this item
-             stores.append({"store": "Нет данных об остатках", "quantity": 0})
-
-
-        # --- Assemble Result Item ---
-        result.append({
-            "id": product_id,
-            "name": product.get("name"),
-            "code": product.get("code"),
-            "article": product.get("article"),
-            "group_name": group_name, # Immediate group name
-            "group_path": group_path, # Full path like "Group / Subgroup"
-            "stores": stores
-        })
-
-    print("Сохранение данных в JSON файл...")
-    output_filename = "stock_data_with_groups.json"
+    
     try:
-        with open(output_filename, "w", encoding="utf-8") as f:
+        # Последовательная загрузка для надежности
+        assortment = get_all_assortment()
+        stock_data = get_all_stock()
+        
+        # Создаем словарь остатков
+        stock_dict = {}
+        for stock in stock_data:
+            try:
+                product_id = stock.get("meta", {}).get("href", "").split("/")[-1]
+                if product_id:
+                    stock_dict.setdefault(product_id, []).extend(stock.get("stockByStore", []))
+            except Exception as e:
+                log_error(f"Ошибка обработки остатка: {str(e)}")
+                continue
+        
+        # Формируем результат
+        result = []
+        for product in assortment:
+            try:
+                product_id = product.get("id")
+                
+                # Обработка остатков
+                stores = []
+                for store in stock_dict.get(product_id, []):
+                    stores.append({
+                        "store": store.get("name", "Неизвестный склад"),
+                        "quantity": store.get("stock", 0)
+                    })
+                
+                # Обработка групп
+                groups = get_group_hierarchy(product)
+                
+                result.append({
+                    "id": product_id,
+                    "name": product.get("name", "Без названия"),
+                    "code": product.get("code", ""),
+                    "article": product.get("article", ""),
+                    "stores": stores if stores else [{"store": "Нет данных", "quantity": 0}],
+                    "groups": groups
+                })
+                
+            except Exception as e:
+                log_error(f"Ошибка обработки товара {product.get('id')}: {str(e)}")
+                continue
+        
+        # Сохранение результата
+        output_file = "stock_data.json"
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=4)
-        print(f"Успешно сохранено: {len(result)} товаров в файл {output_filename}")
-    except IOError as e:
-        print(f"Ошибка записи в файл {output_filename}: {e}")
-
-
-    end_time = time.time()
-    print(f"Обработка завершена за {end_time - start_time:.2f} сек")
-    # Print cache info for debugging/tuning
-    print(f"Folder cache info: {get_folder_details.cache_info()}")
+        
+        print(f"\n=== Обработка завершена ===")
+        print(f"Обработано товаров: {len(result)}")
+        print(f"Файл сохранен: {output_file}")
+        print(f"Общее время: {time.time()-start_time:.2f} секунд")
+        
+    except Exception as e:
+        log_error(f"Критическая ошибка: {str(e)}")
+    finally:
+        input("\nНажмите Enter для выхода...")
 
 if __name__ == "__main__":
     generate_stock_json()
