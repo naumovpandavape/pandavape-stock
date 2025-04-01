@@ -153,7 +153,7 @@ def generate_stock_json():
             "code": product.get("code"),
             "article": product.get("article"),
             "tilda_category": category_hierarchy[-1] if category_hierarchy else None,
-            "tilda_parent_category": category_hierarchy[-2] if len(category_hierarchy) > 1 else None,
+            "tilda_parent_category": " > ".join(category_hierarchy[:-1]) if len(category_hierarchy) > 1 else None,
             "stores": stores or [{"store": "Нет данных", "quantity": 0}]
         })
     
