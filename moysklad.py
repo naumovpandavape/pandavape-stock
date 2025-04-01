@@ -14,7 +14,7 @@ def get_category_hierarchy(category_id, categories_dict):
 
 # Запрос данных из Мой Склад
 API_URL = "https://api.moysklad.ru/api/remap/1.2/entity/product"
-HEADERS = {"Authorization": "Bearer YOUR_TOKEN", "Content-Type": "application/json"}
+HEADERS = {"Authorization": "Bearer a88e8da42807ebf8f89e6fdef605193f7a9ddc8c", "Content-Type": "application/json"}
 response = requests.get(API_URL, headers=HEADERS)
 data = response.json()
 
