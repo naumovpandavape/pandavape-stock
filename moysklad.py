@@ -1,326 +1,76 @@
 import requests
 import json
-import time
-import os
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-# from collections import deque # deque больше не нужен
 
-# --- Настройки ---
-API_URL = "https://api.moysklad.ru/api/remap/1.2"
-# !!! ВАЖНО: Используй свой реальный токен! Храни безопасно!
-API_TOKEN = "a88e8da42807ebf8f89e6fdef605193f7a9ddc8c" # ЗАМЕНИ НА СВОЙ ТОКЕН
-HEADERS = {"Authorization": f"Bearer {API_TOKEN}", "Accept-Encoding": "gzip", "Content-Type": "application/json"}
-OUTPUT_FILENAME = "stock_data.json"
-ERROR_LOG_FILENAME = "error_log.txt"
-REQUEST_DELAY = 0.2
-RETRY_COUNT = 3
-BACKOFF_FACTOR = 1
-FILTER_ONLY_PRODUCTS = True
-FILTER_ONLY_ACTIVE = True
-# --- /Настройки ---
+def get_category_hierarchy(category_id, categories_dict):
+    """
+    Рекурсивно получает всю иерархию категорий.
+    """
+    category = categories_dict.get(category_id)
+    if category:
+        parent_category_id = category.get("parentId")
+        if parent_category_id:
+            parent_category = get_category_hierarchy(parent_category_id, categories_dict)
+            return f"{parent_category} > {category['name']}"
+        return category["name"]
+    return None
 
-# Настройка сессии
-session = requests.Session()
-retry_strategy = Retry(total=RETRY_COUNT, backoff_factor=BACKOFF_FACTOR, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["HEAD", "GET", "OPTIONS"])
-adapter = HTTPAdapter(max_retries=retry_strategy)
-session.mount("https://", adapter)
-session.headers.update(HEADERS)
+# Запрос данных из Моего Склада
+TOKEN = "a88e8da42807ebf8f89e6fdef605193f7a9ddc8c"
+HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json"
+}
 
-def log_error(message, response=None, level="ERROR"):
-    """Логирование ошибок и предупреждений"""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    log_prefix = f"[{timestamp}] {level}:"
-    error_msg = f"{log_prefix} {message}"
-    if response is not None:
-        response_text_preview = response.text[:500] if response.text else "No response body"
-        error_msg += f"\n  URL: {response.url}\n  Status: {response.status_code}\n  Response: {response_text_preview}..."
-    print(error_msg)
-    try:
-        with open(ERROR_LOG_FILENAME, "a", encoding="utf-8") as f:
-             f.write(error_msg + "\n" + ("-"*20) + "\n")
-    except IOError as e:
-        print(f"[{timestamp}] CRITICAL: Не удалось записать в лог-файл {ERROR_LOG_FILENAME}: {e}")
+# Получаем все категории товаров
+categories_url = "https://api.moysklad.ru/api/remap/1.2/entity/productfolder"
+categories_response = requests.get(categories_url, headers=HEADERS)
+categories_data = categories_response.json().get("rows", [])
 
-def fetch_all_pages(endpoint, params=None, expand_params=None, filters=None):
-    """Универсальная функция для получения всех данных с пагинацией"""
-    url = f"{API_URL}/{endpoint}"
-    all_items = []
-    current_params = params.copy() if params else {}
-    req_count = 0
-    if expand_params: current_params["expand"] = expand_params
-    if filters: current_params["filter"] = ";".join(filters)
-    print(f"\nНачало загрузки: {endpoint} (Фильтры: {filters if filters else 'Нет'}, Expand: {expand_params if expand_params else 'Нет'})")
-    while url:
-        req_count += 1
-        log_url = url.replace(API_TOKEN, "***TOKEN***")
-        try:
-            response = session.get(url, params=current_params)
-            if not response.ok:
-                 print(f"    INFO: Response Status: {response.status_code} for {log_url.replace(API_URL,'')}")
-            response.raise_for_status()
-            data = response.json()
-            if "errors" in data:
-                for error in data["errors"]:
-                     log_error(f"API Error in {endpoint}: {error.get('error', 'Unknown')} (Param: {error.get('parameter', '')})", response)
-            batch = data.get("rows", [])
-            if not isinstance(batch, list):
-                 log_error(f"API Error: Ожидался список в 'rows', получен {type(batch)}", response)
-                 batch=[]
-            all_items.extend(batch)
-            if req_count == 1 or len(all_items) % 1000 < len(batch):
-                 print(f"    Загружено: {len(batch)} (Всего: {len(all_items)})")
-            url = data.get("meta", {}).get("nextHref")
-            current_params = None
-            if url:
-                 time.sleep(REQUEST_DELAY)
-        except requests.exceptions.Timeout as e:
-             log_error(f"Таймаут {endpoint}: {e}", getattr(e, 'response', None), level="WARN")
-             print("    Повтор...")
-             time.sleep(5)
-        except requests.exceptions.RequestException as e:
-            response = getattr(e, 'response', None)
-            if response is not None and response.status_code == 401:
-                 log_error(f"401 Auth Error {endpoint}.", response)
-                 print("!!! ПРОВЕРЬТЕ ТОКЕН !!!")
-                 return None
-            elif response is not None and response.status_code == 403:
-                 log_error(f"403 Forbidden {endpoint}.", response, level="WARN")
-                 print("!!! ПРОВЕРЬТЕ ПРАВА ТОКЕНА !!!")
-            else:
-                 log_error(f"Request Error {endpoint}: {e}", response, level="WARN")
-                 print("    Проблема...")
-                 time.sleep(5)
-        except json.JSONDecodeError as e:
-             log_error(f"JSON Decode Error {endpoint}: {e}", response)
-             print("    Пропуск.")
-             url = None
-        except Exception as e:
-             log_error(f"Unexpected Error {endpoint}: {type(e).__name__}: {e}", response)
-             url = None
-    print(f"Загрузка {endpoint} завершена. Всего: {len(all_items)}")
-    return all_items
+# Создаём словарь для быстрого поиска категорий по id
+categories_dict = {category["id"]: category for category in categories_data}
 
-def build_folder_hierarchy_map():
-    """Загружает все папки товаров и строит карту иерархии."""
-    print("\n--- Построение карты иерархии папок ---")
-    all_folders_raw = fetch_all_pages("entity/productfolder", params={"limit": 100})
-    if all_folders_raw is None:
-        return None
+# Получаем все товары
+products_url = "https://api.moysklad.ru/api/remap/1.2/entity/product"
+products_response = requests.get(products_url, headers=HEADERS)
+products_data = products_response.json().get("rows", [])
 
-    folders_map = {}
-    processed_folders_count = 0
-    print("--- Начало детальной отладки обработки папок ---")
-    for folder in all_folders_raw:
-        processed_folders_count += 1
-        folder_id = None
-        name = None
-        parent_id = None
-        parent_data_debug = None
+# Получаем данные о складах
+stores_url = "https://api.moysklad.ru/api/remap/1.2/entity/store"
+stores_response = requests.get(stores_url, headers=HEADERS)
+stores_data = {store["id"]: store["name"] for store in stores_response.json().get("rows", [])}
 
-        try:
-            meta = folder.get("meta")
-            href = meta.get("href") if isinstance(meta,dict) else None
-            folder_id = href.split('/')[-1] if isinstance(href,str) else None
+# Получаем остатки товаров на складах
+stock_url = "https://api.moysklad.ru/api/remap/1.2/report/stock/all"
+stock_response = requests.get(stock_url, headers=HEADERS)
+stock_data = stock_response.json().get("rows", [])
 
-            if not folder_id:
-                print(f"DEBUG Folder {processed_folders_count}: Пропуск папки - не найден ID. Данные: {json.dumps(folder)}")
-                continue
+# Обрабатываем данные
+products_list = []
+for product in products_data:
+    product_id = product["id"]
+    category_id = product.get("productFolder")
+    full_category_path = get_category_hierarchy(category_id, categories_dict)
+    
+    # Получаем остатки по складам
+    product_stocks = [
+        {"store": stores_data.get(stock["storeId"], "Unknown"), "quantity": stock["quantity"]}
+        for stock in stock_data if stock["assortmentId"] == product_id
+    ]
+    
+    # Формируем JSON-объект
+    product_entry = {
+        "id": product_id,
+        "name": product["name"],
+        "code": product.get("code", ""),
+        "article": product.get("article", ""),
+        "tilda_category": full_category_path.split(" > ")[-1] if full_category_path else None,
+        "tilda_parent_category": " > ".join(full_category_path.split(" > ")[:-1]) if full_category_path else None,
+        "stores": product_stocks
+    }
+    products_list.append(product_entry)
 
-            name = folder.get("name", "Без имени")
-            parent_data = folder.get("parent")
-            parent_data_debug = parent_data
+# Сохраняем в JSON
+with open("stock_data.json", "w", encoding="utf-8") as f:
+    json.dump(products_list, f, ensure_ascii=False, indent=4)
 
-            if isinstance(parent_data, dict):
-                parent_meta = parent_data.get("meta")
-                parent_href = parent_meta.get("href") if isinstance(parent_meta,dict) else None
-                parent_id = parent_href.split('/')[-1] if isinstance(parent_href,str) else None
-
-            # Выводим отладочную информацию (можно закомментировать после отладки)
-            # print(f"DEBUG Folder {processed_folders_count}: ID='{folder_id}', Name='{name}', Extracted ParentID='{parent_id}', Raw Parent Data={json.dumps(parent_data_debug)}")
-
-            folders_map[folder_id] = {'name': name, 'parent_id': parent_id}
-
-        except Exception as e:
-            log_error(f"Ошибка обработки папки при построении карты: {e}. Папка: {json.dumps(folder)}")
-            continue # Переходим к следующей папке
-
-    print("--- Конец детальной отладки обработки папок ---")
-    print(f"Карта иерархии папок построена. Обработано папок: {processed_folders_count}. Записей в карте: {len(folders_map)}")
-    # Раскомментируй для вывода примера карты
-    # print("\n--- Пример записей из созданной карты папок (первые 5): ---")
-    # count = 0
-    # for f_id, f_data in folders_map.items():
-    #     print(f"  ID: {f_id} => Name: {f_data.get('name')}, ParentID: {f_data.get('parent_id')}")
-    #     count += 1
-    #     if count >= 5: break
-    # print("--- ---")
-
-    return folders_map
-
-
-def generate_stock_json():
-    """Генерация итогового JSON файла"""
-    print("\n=== Начало обработки данных ===")
-    start_time = time.time()
-    try:
-        folder_map = build_folder_hierarchy_map()
-        if folder_map is None:
-            print("!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось построить карту папок.")
-            return # Выход
-
-        assortment_filters = []
-        expand_params_value = None # Expand не нужен
-        if FILTER_ONLY_PRODUCTS:
-            assortment_filters.append("type=product")
-        if FILTER_ONLY_ACTIVE:
-            assortment_filters.append("archived=false")
-        assortment = fetch_all_pages("entity/assortment", params={"limit": 100}, expand_params=expand_params_value, filters=assortment_filters if assortment_filters else None)
-
-        if assortment is None:
-            print("!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить ассортимент.")
-            return # Выход
-        elif not assortment:
-            print("\nВНИМАНИЕ: Список ассортимента пуст.")
-            try:
-                with open(OUTPUT_FILENAME, "w", encoding="utf-8") as f:
-                    json.dump([], f)
-                print(f"Создан пустой файл: {OUTPUT_FILENAME}")
-            except IOError as e:
-                log_error(f"Не удалось создать пустой файл {OUTPUT_FILENAME}: {e}")
-            return # Выход
-
-        stock_data = fetch_all_pages("report/stock/bystore", params={"limit": 100})
-        if stock_data is None:
-            print("!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить остатки.")
-            return # Выход
-        if not stock_data:
-            print("\nВНИМАНИЕ: Данные по остаткам пусты.")
-
-        print("\nСоздание словаря остатков...")
-        stock_dict = {}
-        stock_processed_count = 0
-        if stock_data:
-            for stock in stock_data:
-                try:
-                    product_id_from_stock = stock.get("meta", {}).get("href", "").split("/")[-1].split("?")[0]
-                    if product_id_from_stock:
-                        stores_list = stock.get("stockByStore", [])
-                        if isinstance(stores_list, list):
-                            stock_dict.setdefault(product_id_from_stock, []).extend(stores_list)
-                            stock_processed_count += 1
-                except Exception as e:
-                    log_error(f"Ошибка обработки записи остатка: {e}. Запись: {json.dumps(stock)}")
-                    continue # Переход к след. записи остатка
-            print(f"Словарь остатков создан. Обработано записей: {stock_processed_count}")
-        else:
-            print("Данные по остаткам отсутствуют.")
-
-        print("\nФормирование итогового JSON...")
-        result_list = []
-        processed_count = 0
-        products_skipped_no_article = 0
-        products_without_folder_info = 0
-        for product in assortment:
-            try:
-                 processed_count += 1
-                 product_id = product.get("id")
-                 product_name = product.get("name", "Без названия")
-                 product_code = product.get("code", "")
-
-                 if not product_id:
-                      continue # Пропуск товара без ID
-
-                 article = product.get("article", "") or product_code
-                 if not article:
-                      products_skipped_no_article += 1
-                      continue # Пропуск товара без артикула/кода
-
-                 stores_output = []
-                 for store_info in stock_dict.get(product_id, []):
-                     if isinstance(store_info, dict):
-                         qty = store_info.get("stock", 0.0)
-                         try:
-                             qty = float(qty) if qty is not None else 0.0
-                         except (ValueError, TypeError):
-                             qty = 0.0
-                         stores_output.append({"store": store_info.get("name", "?"), "quantity": qty})
-                 final_stores = stores_output or [{"store": "Нет данных", "quantity": 0.0}]
-
-                 tilda_category = None
-                 tilda_parent_category = None
-                 folder_id = None
-                 product_folder_meta = product.get("productFolder", {}).get("meta")
-
-                 if isinstance(product_folder_meta, dict):
-                      folder_href = product_folder_meta.get("href")
-                      if isinstance(folder_href, str):
-                           folder_id = folder_href.split('/')[-1]
-
-                 if folder_id and folder_id in folder_map:
-                      folder_info = folder_map[folder_id]
-                      tilda_category = folder_info.get('name')
-                      parent_id = folder_info.get('parent_id')
-                      if parent_id and parent_id in folder_map:
-                           parent_info = folder_map[parent_id]
-                           tilda_parent_category = parent_info.get('name')
-                      elif parent_id:
-                           # Записываем предупреждение, если ID родителя есть, но сама папка-родитель не найдена в карте
-                           log_error(f"Родительская папка с ID '{parent_id}' для папки '{tilda_category}' (товар '{product_name}') не найдена в карте папок.", level="WARN")
-                 elif folder_id:
-                      # Записываем предупреждение, если ID папки товара не найден в карте
-                      log_error(f"Папка с ID '{folder_id}' для товара '{product_name}' не найдена в карте папок.", level="WARN")
-                      products_without_folder_info += 1
-                 else:
-                      # Товар не имеет папки или не удалось извлечь ID папки
-                      products_without_folder_info += 1
-
-                 output_product = {
-                      "id": product_id,
-                      "name": str(product_name),
-                      "code": str(product_code),
-                      "article": str(article),
-                      "tilda_category": str(tilda_category) if tilda_category is not None else None,
-                      "tilda_parent_category": str(tilda_parent_category) if tilda_parent_category is not None else None,
-                      "stores": final_stores
-                 }
-                 result_list.append(output_product)
-            except Exception as e:
-                 log_error(f"Критическая ошибка обработки товара ID {product.get('id', 'N/A')} '{product.get('name', 'N/A')}': {type(e).__name__}: {e}")
-                 import traceback
-                 traceback.print_exc()
-                 continue # Переход к след. товару
-
-        print(f"\nФормирование JSON завершено. Товаров в списке: {len(result_list)}")
-        if products_skipped_no_article > 0:
-            print(f"  ПРЕДУПРЕЖДЕНИЕ: {products_skipped_no_article} товаров пропущено (нет article/code).")
-        if products_without_folder_info > 0:
-            print(f"  ПРЕДУПРЕЖДЕНИЕ: {products_without_folder_info} товаров не имеют папки или информация о папке не найдена.")
-
-        print(f"\nСохранение файла: {OUTPUT_FILENAME}")
-        try:
-            with open(OUTPUT_FILENAME, "w", encoding="utf-8") as f:
-                 json.dump(result_list, f, ensure_ascii=False, indent=2)
-            print(f"Файл успешно сохранен.")
-        except IOError as e:
-            log_error(f"Не удалось сохранить файл {OUTPUT_FILENAME}: {e}")
-        except Exception as e:
-            log_error(f"Неожиданная ошибка при сохранении файла: {e}")
-
-        print(f"\n=== Обработка полностью завершена ===")
-        print(f"Итого товаров в файле: {len(result_list)}")
-        end_time = time.time()
-        print(f"Общее время выполнения: {end_time - start_time:.2f} секунд")
-    except Exception as e:
-        log_error(f"КРИТИЧЕСКАЯ ОШИБКА выполнения скрипта: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        print("\nСкрипт завершил работу.")
-
-if __name__ == "__main__":
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-    print(f"Рабочая директория: {os.getcwd()}")
-    generate_stock_json()
-    # input("\nНажмите Enter для выхода...")
+print("Данные успешно собраны и сохранены в stock_data.json")
