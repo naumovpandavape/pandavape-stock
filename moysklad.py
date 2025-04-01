@@ -1,7 +1,7 @@
 import requests
 import json
 
-API_URL = "https://online.moysklad.ru/api/remap/1.2/entity/product"
+API_URL = "https://api.moysklad.ru/api/remap/1.2/entity/product"
 TOKEN = "a88e8da42807ebf8f89e6fdef605193f7a9ddc8c"
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
