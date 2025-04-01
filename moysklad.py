@@ -1,53 +1,65 @@
 import requests
 import json
 
-# Функция для получения полной иерархии категорий
+API_URL = "https://online.moysklad.ru/api/remap/1.2/entity/product"
+TOKEN = "a88e8da42807ebf8f89e6fdef605193f7a9ddc8c"
+HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept": "application/json"
+}
+
 def get_category_hierarchy(category_id, categories_dict):
-    path = []
+    hierarchy = []
     while category_id:
-        category = categories_dict.get(str(category_id))
+        category = categories_dict.get(category_id)
         if not category:
             break
-        path.append(category["name"])
+        hierarchy.append(category["name"])
         category_id = category.get("parent")
-    return " > ".join(reversed(path))
+    return " > ".join(reversed(hierarchy)) if hierarchy else None
 
-# Запрос данных из Мой Склад
-API_URL = "https://api.moysklad.ru/api/remap/1.2/entity/product"
-HEADERS = {"Authorization": "Bearer a88e8da42807ebf8f89e6fdef605193f7a9ddc8c", "Content-Type": "application/json"}
-response = requests.get(API_URL, headers=HEADERS)
-data = response.json()
+def fetch_categories():
+    url = "https://online.moysklad.ru/api/remap/1.2/entity/productfolder"
+    response = requests.get(url, headers=HEADERS)
+    categories = response.json().get("rows", [])
+    return {cat["id"]: {"name": cat["name"], "parent": cat.get("productFolder", {}).get("id")} for cat in categories}
 
-# Получаем список категорий
-categories_url = "https://api.moysklad.ru/api/remap/1.2/entity/productfolder"
-categories_response = requests.get(categories_url, headers=HEADERS)
-categories_data = categories_response.json().get("rows", [])
+def fetch_products():
+    response = requests.get(API_URL, headers=HEADERS)
+    return response.json().get("rows", [])
 
-# Создаём словарь категорий
-categories_dict = {category["id"]: {"name": category["name"], "parent": category.get("productFolder") and category["productFolder"].get("id")} for category in categories_data}
+def fetch_stock():
+    stock_url = "https://online.moysklad.ru/api/remap/1.2/report/stock/all"
+    response = requests.get(stock_url, headers=HEADERS)
+    return response.json().get("rows", [])
 
-# Обрабатываем товары
-products = []
-for item in data.get("rows", []):
-    category_id = item.get("productFolder") and item["productFolder"].get("id")
-    full_category_path = get_category_hierarchy(category_id, categories_dict) if category_id else None
+def main():
+    categories_dict = fetch_categories()
+    products = fetch_products()
+    stock_data = fetch_stock()
+    stock_dict = {item["id"]: item["stock"] for item in stock_data}
     
-    product = {
-        "id": item["id"],
-        "name": item["name"],
-        "code": item.get("code"),
-        "article": item.get("article"),
-        "tilda_category": categories_dict.get(str(category_id), {}).get("name"),
-        "tilda_parent_category": full_category_path,
-        "stores": [
-            {"store": store["name"], "quantity": store.get("stock", 0)}
-            for store in item.get("storeStock", [])
-        ]
-    }
-    products.append(product)
+    result = []
+    for product in products:
+        category_id = product.get("productFolder", {}).get("id")
+        full_category_path = get_category_hierarchy(category_id, categories_dict) if category_id else None
+        
+        item = {
+            "id": product["id"],
+            "name": product["name"],
+            "code": product.get("code"),
+            "article": product.get("article"),
+            "tilda_category": full_category_path,
+            "tilda_parent_category": categories_dict.get(category_id, {}).get("parent"),
+            "stores": [
+                {"store": stock["name"], "quantity": stock_dict.get(product["id"], 0)}
+                for stock in stock_data if stock.get("assortment", {}).get("id") == product["id"]
+            ]
+        }
+        result.append(item)
+    
+    with open("stock_data.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=4)
 
-# Сохраняем данные в JSON
-with open("stock_data.json", "w", encoding="utf-8") as f:
-    json.dump(products, f, ensure_ascii=False, indent=4)
-
-print("Данные успешно обновлены и сохранены в stock_data.json")
+if name == "__main__":
+    main()
