@@ -6,7 +6,8 @@ from urllib3.util.retry import Retry
 
 # Настройки
 API_URL = "https://api.moysklad.ru/api/remap/1.2"
-API_TOKEN = "{MOYSKLAD_API_TOKEN}"
+import os
+API_TOKEN = os.environ['MOYSKLAD_API_TOKEN']
 HEADERS = {
     "Authorization": f"Bearer {API_TOKEN}",
     "Accept-Encoding": "gzip"
