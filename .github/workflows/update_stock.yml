@@ -13,6 +13,8 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run Python script
+        env:
+          MOYSKLAD_API_TOKEN: ${{ secrets.MOYSKALD_API_TOKEN }}
         run: python moysklad.py  # Генерируем stock_data.json
 
       - name: Prepare JSON payload
